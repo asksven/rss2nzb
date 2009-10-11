@@ -1,6 +1,10 @@
 #!/usr/bin/perl
 # retrieve NZB files from RSS feeds based on regex rules and reject rules
 # copyleft Sven Knispel
+# Last change:		$Date$
+# By:			$Author$
+# Revision:		$Revision$
+#
 # History
 # 2009-10-10	v0.1	Initial version
 # 2009-10-10	v0.2	Added handling of option from config file

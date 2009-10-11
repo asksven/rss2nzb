@@ -1,6 +1,10 @@
 #!/usr/bin/perl
 # retrieve RSS feeds and save them as files
 # copyleft Sven Knispel
+# Last change:		$Date$
+# By:			$Author$
+# Revision:		$Revision$
+#
 # History
 # 2009-10-10	v0.1	Initial version
 # 2009-10-10	v0.2	Added handling of option from config file
