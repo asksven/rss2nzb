@@ -25,6 +25,7 @@
 use XML::RSS;
 use LWP::Simple;
 use LWP::UserAgent;
+use HTTP::Request;
 use YAML::Tiny;
 use Log::Log4perl;
 use File::Touch;
@@ -150,11 +151,12 @@ foreach my $feed (keys %feeds)
 	    
 	    # extract nzb by regexp
 	    # e.g. for regexp for usenet revo: .*\<a href=\"(.*attachment.*)\"\>.* matches the URL
-	    $logger->debug("Trying to guess NZB URL with regexp '$regexp'");
-	    $_ = $value;
 	    my $regexp = $feeds{$feed}{'regexp'};
+	    $logger->debug("Trying to guess NZB URL with regexp '$regexp'");
+#	    $_ = $value;
+	    
 
-	    if (/$regexp/)
+	    if ($value =~ /$regexp/)
 	    {
 	      $logger->debug("Matched link $1");
 	      $link = $1;
@@ -174,7 +176,6 @@ foreach my $feed (keys %feeds)
 	    $logger->error("Undefined action '$linkAction' for feed $feed. No action taken");
 	  }
 	}
-      
       }
       else
       {
@@ -189,7 +190,7 @@ foreach my $feed (keys %feeds)
 sub getNzb
 {
   my ($title, $URI, $cookieFile) = @_;
-  
+ 
   my $fileName = &normalizeTitle($title);
   # donload only if file does not already exist
   if (!( -e ($targetDir . $fileName) ))
@@ -198,21 +199,33 @@ sub getNzb
     if (!( -e ($cacheDir . $fileName) ))
     {
       $logger->info("Downloading $title from $URI");
-
+      
+      $logger->info("Cookie found, using LWP::UserAgent");
       my $browser = LWP::UserAgent->new;
       $logger->info("Getting $URI with cookie '" . $cookieDir . $cookieFile . "'");
       if ($cookieFile ne "")
       {
 	$browser->cookie_jar({ file => $cookieDir . $cookieFile });
       }
+      my $req= HTTP::Request->new('GET',$URI);
+
+      # set header as certain webservers were found to be picky and returning error 601
+      $req->header('Accept' => '*/*');
+      $req->header('User-Agent' => 'Wget/1.11.4');
+
+      $logger->debug("request accept:" . $req->header('Accept'));
+
+      my $response = $browser->request($req, $targetDir . $fileName);
+
+      if ($response->is_success)
+      {
+	$logger->debug("Downloaded: $response->decoded_content");
+	File::Touch::touch($cacheDir . $fileName);
+      }
       else
       {
-	$browser->cookie_jar({ });
+	$logger->error("Error " . $response->status_line);
       }
-
-      $browser->get($URI, ':content_file' => $targetDir . $fileName);
-
-      File::Touch::touch($cacheDir . $fileName);
     }
     else
     {
@@ -232,7 +245,6 @@ sub normalizeTitle
 
   $title =~s/\//_/g;	# / would be a directory, replace by _
   $title =~s/~/_/g;	# ~ would be a my home, replace by _ 
-  $title = $_;
 
   my $fileName = $title . '.nzb';
   $logger->debug("Normalized '$title' into '$fileName");
