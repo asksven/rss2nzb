@@ -3,7 +3,7 @@
 # copyleft Sven Knispel
 # Last change:		$Date$
 # By:			$Author$
-# Revision:		$Revision$
+# Revision:		$Rev$
 #
 # History
 # 2009-10-10	v0.1	Initial version
