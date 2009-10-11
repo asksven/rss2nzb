@@ -1,9 +1,9 @@
 #!/usr/bin/perl
 # retrieve RSS feeds and save them as files
 # copyleft Sven Knispel
-# Last change:		$Date$
-# By:			$Author$
-# Revision:		$Revision$
+# Last change:		$Date: 2009-10-11 15:49:29 +0200 (Sun, 11 Oct 2009) $
+# By:			$Author: sven $
+# Revision:		$Rev$
 #
 # History
 # 2009-10-10	v0.1	Initial version

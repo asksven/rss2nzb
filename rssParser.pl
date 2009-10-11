@@ -1,8 +1,8 @@
 #!/usr/bin/perl
 # retrieve NZB files from RSS feeds based on regex rules and reject rules
 # copyleft Sven Knispel
-# Last change:		$Date$
-# By:			$Author$
+# Last change:		$Date: 2009-10-11 15:50:17 +0200 (Sun, 11 Oct 2009) $
+# By:			$Author: sven $
 # Revision:		$Rev$
 #
 # History
