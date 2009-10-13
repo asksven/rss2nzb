@@ -19,6 +19,10 @@
 #					'action' can be default or "guessnzb|dump" when the URL is to be found in a CDATA (guess is with regexp from field 'regexp')
 #			For pages requiring authentification optional field 'use-cookie' was added. That field should contain a valid LWP cookie
 #				I create a utility saveCookie.pl as example on how to retrieve a cookie as wget cookies can not be used with LWP
+# 2009-10-13	v0.4	Cleaned up logging for it to be screen-friendly
+#			Added inline POD documentation
+#			Added command line parameters
+#			Added 'auth' parameter for feeds requiring a session ID
 #
 # TODO
 
@@ -29,10 +33,35 @@ use HTTP::Request;
 use YAML::Tiny;
 use Log::Log4perl;
 use File::Touch;
+use Pod::Usage;
+use Getopt::Long ;
 
 use strict;
 
-my $config = YAML::Tiny->read('rss-processor.conf');
+my $help 	= 0 ;
+my $man 	= 0 ;
+my $conf 	= "rss2nzb.conf";
+my $conf_file 	= 'rss-tools.logconfig';
+
+
+
+GetOptions(
+    "help|?"            => \$help,
+    "man"               => \$man,
+    "config-file|f=s"	=> \$conf
+    );
+
+my $testFeed = lc $ARGV[0];
+
+pod2usage(status => 0, -verbose => 99, sections => 'NAME|SYNOPSIS|DESCRIPTION|VERSION') if $help ;
+pod2usage(-exitstatus => 0, -verbose => 99, sections => 'NAME|SYNOPSIS|DESCRIPTION|VERSION|CONFIGURATION|EXAMPLE') if $man ;
+
+# init logging
+Log::Log4perl->init($conf_file);
+my $logger 	= Log::Log4perl::get_logger('main');
+
+my $config = YAML::Tiny->read($conf)
+    || $logger->logdie("Config file $conf is missing");
 
 my $node 	= $config->[0]->{'feeds'};
 my %feeds 	= %{$node};
@@ -42,11 +71,7 @@ my $targetDir	= $config->[0]->{'nzb-path'};
 my $cacheDir	= $config->[0]->{'cache-path'};
 my $cookieDir	= $config->[0]->{'cookie-path'};
 
-# init logging
-my $conf_file 	= 'rss-tools.logconfig';
 
-Log::Log4perl->init($conf_file);
-my $logger 	= Log::Log4perl::get_logger('main');
 
 
 die ("directory $sourceDir does not exist"	&& $logger->logdie("directory $sourceDir does not exist"))	unless (-e $sourceDir);
@@ -62,11 +87,18 @@ $cookieDir 	.= "/" unless ($cookieDir eq "");
 
 foreach my $feed (keys %feeds)
 {
+  if (($testFeed ne "") && ($feeds{$feed}{'rss-file'} ne $testFeed))
+  {
+    $logger->debug("Processing restricted to $testFeed, skipping $feeds{$feed}{'rss-file'}");
+    next;
+  };
+
   my $sourceFile	= $feeds{$feed}{'rss-file'};
   my $rss 		= XML::RSS->new;
 
   if (!(-e $sourceDir . $sourceFile))
   {
+    $logger->warn("$sourceFile was not found in $sourceDir");
     next;
   }
 
@@ -99,6 +131,8 @@ foreach my $feed (keys %feeds)
 	  # default link tag is "link" but it can be overridden by setting feed property 'link-tag' in case the rss does not point to NZBs
 	  my $linkTag		= $feeds{$feed}{'link-tag'};
 	  $linkTag 	= "link"	unless ($linkTag ne "");
+	  my $auth	= $feeds{$feed}{'auth'};
+	  $auth		= ('&' . $auth) unless ($auth eq "");
 
 	  # default action is 'getnzb' but it can be overridden by setting feed property 'action' to 'dump' or 'guessnzb' 
 	  my $linkAction 	= $feeds{$feed}{'action'};
@@ -112,7 +146,7 @@ foreach my $feed (keys %feeds)
 	  # go for normal action: download the link as nzb
 	  if ($linkAction eq "getnzb")
 	  {
-	    getNzb($item->{'title'}, $item->{$linkTag});
+	    getNzb($item->{'title'}, $item->{$linkTag} . $auth);
 	  }
 	  # alternative action 'dump' is for debugging purpose
 	  elsif ($linkAction eq "dump")
@@ -153,8 +187,6 @@ foreach my $feed (keys %feeds)
 	    # e.g. for regexp for usenet revo: .*\<a href=\"(.*attachment.*)\"\>.* matches the URL
 	    my $regexp = $feeds{$feed}{'regexp'};
 	    $logger->debug("Trying to guess NZB URL with regexp '$regexp'");
-#	    $_ = $value;
-	    
 
 	    if ($value =~ /$regexp/)
 	    {
@@ -169,7 +201,7 @@ foreach my $feed (keys %feeds)
 	    }
 	    
 	    # if a link was found assume it's an NZB and download it
-	    getNzb($item->{'title'}, $link, $cookieFile);
+	    getNzb($item->{'title'}, $link . $auth, $cookieFile);
 	  }
 	  else
 	  {
@@ -200,9 +232,9 @@ sub getNzb
     {
       $logger->info("Downloading $title from $URI");
       
-      $logger->info("Cookie found, using LWP::UserAgent");
+      $logger->debug("Cookie found, using LWP::UserAgent");
       my $browser = LWP::UserAgent->new;
-      $logger->info("Getting $URI with cookie '" . $cookieDir . $cookieFile . "'");
+      $logger->debug("Getting $URI with cookie '" . $cookieDir . $cookieFile . "'");
       if ($cookieFile ne "")
       {
 	$browser->cookie_jar({ file => $cookieDir . $cookieFile });
@@ -229,12 +261,12 @@ sub getNzb
     }
     else
     {
-      $logger->info("Skipping: file $fileName already exists in cache");
+      $logger->debug("Skipping: file $fileName already exists in cache");
     }
   }
   else
   {
-    $logger->info("Skipping: file $fileName already exists");
+    $logger->debug("Skipping: file $fileName already exists");
   }
 }
 
@@ -252,3 +284,41 @@ sub normalizeTitle
   return $fileName;
 }
 
+__END__
+
+=head1 NAME
+
+rssCollector.pl - An rss feed grabber
+
+=head1 SYNOPSIS
+
+perl rssParser.pl [-f <config-file>|--config-file=<config-file>] [<feed-file>]
+
+ Options:
+   -f, --config-file    use specific config file
+   -?, --help		shows this help
+   --man		shows the full help
+   feed-file		restrict the processing to a single feed by naming the file
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<--help>
+Print a brief help message and exits.
+
+=item B<--man>
+Prints the manual page and exits.
+
+=back
+
+=head1 DESCRIPTION
+
+This program will read the rss-processor.conf file and download rss feeds defined there to files.
+
+=head1 CONFIGURATION
+
+The configuration is done in YAML syntax in a common fashion for all rss2nzb utilities. For help see perl rssConfig.pl --man
+
+
+=cut
