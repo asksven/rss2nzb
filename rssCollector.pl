@@ -12,6 +12,9 @@
 #			log level is defined in config
 #			target directory is defined in config
 #			added proper logging (see definition in rss-tools.logconfig
+# 2009-10-13	v0.3	Cleaned up logging for it to be screen-friendly
+#			Added inline POC documentation
+#			Added command line parameters
 #
 # TODO
 
@@ -184,6 +187,9 @@ Optional: the action to take with <link> of the rss <item>. Valid values are nzb
 
 =item 'link-tag:'
 Optional: the tag where to find the link. Default is <link> but it can be overridden. Valid values are any tag from the feed
+
+=item 'auth:'
+Optional: an authentication string to be appended to URL when retrieving NZBs (session ID for site requiring auth)
 
 =item 'regexp:'
 Optional: it can be required to define a regexp to determine the URL of the link for download. In that case the regexp must contain a part between () to be used as match
