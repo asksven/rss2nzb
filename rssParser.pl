@@ -23,6 +23,10 @@
 #			Added inline POD documentation
 #			Added command line parameters
 #			Added 'auth' parameter for feeds requiring a session ID
+#			Added option to override default target dir at a feed basis
+#			Added notification of whatever the process resulted in (rss and mail are supported)
+#			Added global error handling for showing stacktrace in case of unexpected errors
+#			Added -v|--verbose option to show debug messages
 #
 # TODO
 
@@ -31,24 +35,38 @@ use LWP::Simple;
 use LWP::UserAgent;
 use HTTP::Request;
 use YAML::Tiny;
-use Log::Log4perl;
+use Log::Log4perl qw(get_logger :levels);
 use File::Touch;
 use Pod::Usage;
-use Getopt::Long ;
+use Getopt::Long;
+use Devel::StackTrace;
+
+use ex::override GLOBAL_die => sub
+{
+    local *__ANON__ = "custom_die";
+    print
+        'Error: ', @_, "\n",
+        "Stack trace:\n",
+        Devel::StackTrace->new(no_refs => 1)->as_string, "\n";
+    exit 1;
+};
+
 
 use strict;
 
-my $help 	= 0 ;
-my $man 	= 0 ;
-my $conf 	= "rss2nzb.conf";
-my $conf_file 	= 'rss-tools.logconfig';
-
+my $help 		= 0 ;
+my $man 		= 0 ;
+my $verbose		= 0;
+my $conf 		= "rss2nzb.conf";
+my $conf_file 		= 'rss-tools.logconfig';
+my @notifications	= ();
 
 
 GetOptions(
     "help|?"            => \$help,
     "man"               => \$man,
-    "config-file|f=s"	=> \$conf
+    "config-file|f=s"	=> \$conf,
+    "verbose|v"		=> \$verbose
     );
 
 my $testFeed = lc $ARGV[0];
@@ -59,6 +77,11 @@ pod2usage(-exitstatus => 0, -verbose => 99, sections => 'NAME|SYNOPSIS|DESCRIPTI
 # init logging
 Log::Log4perl->init($conf_file);
 my $logger 	= Log::Log4perl::get_logger('main');
+if ($verbose == 1)
+{
+  $logger->level($DEBUG);
+  Log::Log4perl->appender_thresholds_adjust(-1, ['Screen']);
+}
 
 my $config = YAML::Tiny->read($conf)
     || $logger->logdie("Config file $conf is missing");
@@ -71,9 +94,6 @@ my $targetDir	= $config->[0]->{'nzb-path'};
 my $cacheDir	= $config->[0]->{'cache-path'};
 my $cookieDir	= $config->[0]->{'cookie-path'};
 
-
-
-
 die ("directory $sourceDir does not exist"	&& $logger->logdie("directory $sourceDir does not exist"))	unless (-e $sourceDir);
 die ("directory $targetDir does not exist" 	&& $logger->logdie("directory $targetDir does not exist")) 	unless (-e $targetDir);
 die ("directory $cacheDir does not exist" 	&& $logger->logdie("directory $cacheDir does not exist")) 	unless (-e $cacheDir);
@@ -83,7 +103,6 @@ $sourceDir	.= "/" unless ($sourceDir eq "");
 $targetDir 	.= "/" unless ($targetDir eq "");
 $cacheDir 	.= "/" unless ($cacheDir eq "");
 $cookieDir 	.= "/" unless ($cookieDir eq "");
-
 
 foreach my $feed (keys %feeds)
 {
@@ -107,18 +126,22 @@ foreach my $feed (keys %feeds)
   # print the title and link of each RSS item
   foreach my $item (@{$rss->{'items'}})
   {
+    # path for storing nzbs is either the global path or was overridden at feed level
+    my $nzbPath = $targetDir;
+    $nzbPath = ($feeds{$feed}{'nzb-path'} . "/") unless ($feeds{$feed}{'nzb-path'} eq "");
+
     my @filters = split(/,/, $feeds{$feed}{'matches'});
+    $logger->debug("trying matches '" . $feeds{$feed}{'matches'} . "' on " . $item->{'title'});
     foreach my $filter (@filters)
     {
-      $logger->debug("trying to match '$filter' on '" . $item->{'title'});
       if ($item->{'title'} ~~ m/$filter/)
       {
 	$logger->debug("match");
 	my @rejects	= split(/,/, $feeds{$feed}{'rejects'});
 	my $rejected 	= 0;
+        $logger->debug("trying rejects expressions '" . $feeds{$feed}{'rejects'} . "' against " . $item->{'title'});
 	foreach my $reject (@rejects)
 	{
-	  $logger->debug("trying to reject rule '$reject' on '" . $item->{'title'});
 	  if ( ($rejected == 0) && ($item->{'title'} ~~ m/$reject/))
 	  {
 	    $rejected = 1;
@@ -129,7 +152,7 @@ foreach my $feed (keys %feeds)
 	{
 	  $logger->debug("Match found: $item->{'title'}");
 	  # default link tag is "link" but it can be overridden by setting feed property 'link-tag' in case the rss does not point to NZBs
-	  my $linkTag		= $feeds{$feed}{'link-tag'};
+	  my $linkTag	= $feeds{$feed}{'link-tag'};
 	  $linkTag 	= "link"	unless ($linkTag ne "");
 	  my $auth	= $feeds{$feed}{'auth'};
 	  $auth		= ('&' . $auth) unless ($auth eq "");
@@ -142,13 +165,16 @@ foreach my $feed (keys %feeds)
 	  my $cookieFile 	= $feeds{$feed}{'use-cookie'};
 
 	  $logger->debug("Going to retrieve tag: '$linkTag' with action '$linkAction'");
-	  
+	  #
 	  # go for normal action: download the link as nzb
+	  #
 	  if ($linkAction eq "getnzb")
 	  {
-	    getNzb($item->{'title'}, $item->{$linkTag} . $auth);
+	    getNzb($item->{'title'}, $item->{$linkTag} . $auth, "", $nzbPath);
 	  }
+	  #
 	  # alternative action 'dump' is for debugging purpose
+	  #
 	  elsif ($linkAction eq "dump")
 	  {
 	    my $value 	= "";
@@ -166,8 +192,9 @@ foreach my $feed (keys %feeds)
 
 	    $logger->debug("DUMP:::" . $value . ":::");	    
 	  }
-
+	  #
 	  # method to extract nzb URL from a field using regex from feed attribue 'regexp'
+	  #
 	  elsif ($linkAction eq "guessnzb")
 	  {
 	    my $value 	= "";
@@ -201,7 +228,7 @@ foreach my $feed (keys %feeds)
 	    }
 	    
 	    # if a link was found assume it's an NZB and download it
-	    getNzb($item->{'title'}, $link . $auth, $cookieFile);
+	    getNzb($item->{'title'}, $link . $auth, $cookieFile, $nzbPath);
 	  }
 	  else
 	  {
@@ -209,19 +236,20 @@ foreach my $feed (keys %feeds)
 	  }
 	}
       }
-      else
-      {
-	$logger->debug("no match");
-      }
     }
   }
 }
+
+# write any notifications to the proper place
+&postProcess;
+
+# END
 
 
 # retrieve linked file
 sub getNzb
 {
-  my ($title, $URI, $cookieFile) = @_;
+  my ($title, $URI, $cookieFile, $targetDir) = @_;
  
   my $fileName = &normalizeTitle($title);
   # donload only if file does not already exist
@@ -230,22 +258,25 @@ sub getNzb
     # check if in cache
     if (!( -e ($cacheDir . $fileName) ))
     {
-      $logger->info("Downloading $title from $URI");
+      $logger->info("Downloading $title from $URI to " . $targetDir . $fileName);
       
-      $logger->debug("Cookie found, using LWP::UserAgent");
       my $browser = LWP::UserAgent->new;
-      $logger->debug("Getting $URI with cookie '" . $cookieDir . $cookieFile . "'");
+
       if ($cookieFile ne "")
       {
 	$browser->cookie_jar({ file => $cookieDir . $cookieFile });
+	$logger->debug("Getting $URI with cookie '" . $cookieDir . $cookieFile . "'");
+      }
+      else
+      {
+	$logger->debug("Getting $URI without cookie");
       }
       my $req= HTTP::Request->new('GET',$URI);
 
       # set header as certain webservers were found to be picky and returning error 601
       $req->header('Accept' => '*/*');
-      $req->header('User-Agent' => 'Wget/1.11.4');
-
-      $logger->debug("request accept:" . $req->header('Accept'));
+#      $req->header('User-Agent' => 'Wget/1.11.4');
+      $req->header('User-Agent' => 'Mozilla/4.0 (compatible; MSIE 7.0b; Windows NT 6.0)');
 
       my $response = $browser->request($req, $targetDir . $fileName);
 
@@ -253,6 +284,7 @@ sub getNzb
       {
 	$logger->debug("Downloaded: $response->decoded_content");
 	File::Touch::touch($cacheDir . $fileName);
+	&notify("Downloaded $title to " . $targetDir);
       }
       else
       {
@@ -284,6 +316,87 @@ sub normalizeTitle
   return $fileName;
 }
 
+# store a notification
+sub notify
+{
+  my ($message) = @_;
+  push(@notifications, $message);
+}
+
+# send collected notifications
+sub postProcess
+{
+  $logger->debug("Post-prcessing started");
+  my $method  = $config->[0]->{'notify-method'};
+  my $address = $config->[0]->{'notify-to'};
+
+  return unless ($method ne "");
+
+  if ($method eq "rss")
+  {
+    my $rss;
+
+    # if the file does not exist create it
+    # else read the existing one
+    if (!( -e ($address)))
+    {
+      $logger->debug("creating rss file $address");
+      $rss = XML::RSS->new (version => '2.0', stylesheet => 'http://ws-sven/rssstyle.xsl');
+      $rss->channel(title          => 'rss2nzb',
+               link           => '',
+               language       => 'en',
+               description    => 'Detected NZBs',
+               copyright      => 'Copyright 2009',
+               docs           => 'http://',
+               );
+    }
+    else
+    {
+      $rss = XML::RSS->new;
+      $rss->parsefile("$address");
+    }
+
+    # add whatever events occured during processing
+    foreach my $message (@notifications)
+    {
+      $logger->debug("adding to rss feed: $message");
+      my $dt = DateTime->now;
+      $rss->add_item(title => $dt->dmy("/") . " " . $dt->hms(":") . " " . $message, link => "file://");
+    }
+    
+    $logger->debug("saving rss to $address");
+    $rss->save($address);
+  }
+  elsif ($method eq "mail")
+  {
+    my $message = "";
+    foreach my $line (@notifications)
+    {
+      $message .= $line . "\n";
+    }
+    
+    basicSendMail("rss2nzb", $address, "Notification from rss2nzb", $message);
+  }
+  else
+  {
+    $logger->error("Unsupported notification method: $method");
+  }
+}
+
+sub basicSendMail {
+    my ($from, $to, $subject, $message) = @_;
+
+    my $mail = '' ;
+    $mail .= "To: $to\n" ;
+    $mail .= "Subject: $subject\n" ;
+    $mail .= $message ;
+
+    open SENDMAIL, "|/usr/lib/sendmail -t" or return -1 ;
+    print SENDMAIL $mail ;
+    close SENDMAIL ;
+    return 1 ;
+}
+
 __END__
 
 =head1 NAME
@@ -296,6 +409,7 @@ perl rssParser.pl [-f <config-file>|--config-file=<config-file>] [<feed-file>]
 
  Options:
    -f, --config-file    use specific config file
+   -v, --verbose        show more info about what happens
    -?, --help		shows this help
    --man		shows the full help
    feed-file		restrict the processing to a single feed by naming the file
