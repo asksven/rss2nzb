@@ -15,13 +15,14 @@
 # 2009-10-13	v0.3	Cleaned up logging for it to be screen-friendly
 #			Added inline POC documentation
 #			Added command line parameters
+#			Added -v|--verbose option to show debug messages
 #
 # TODO
 
 
 use LWP::Simple;
 use YAML::Tiny;
-use Log::Log4perl;
+use Log::Log4perl qw(get_logger :levels);
 use Pod::Usage;
 use Getopt::Long ;
 
@@ -29,13 +30,15 @@ use strict;
 
 my $help 	= 0 ;
 my $man 	= 0 ;
+my $verbose		= 0;
 my $conf 	= "rss2nzb.conf";
 my $logger_conf	= "rss-tools.logconfig";
 
 GetOptions(
     "help|?"            => \$help,
     "man"               => \$man,
-    "config-file|f=s"	=> \$conf
+    "config-file|f=s"	=> \$conf,
+    "verbose|v"		=> \$verbose
     );
 
 my $testFeed = lc $ARGV[0];
@@ -46,6 +49,11 @@ pod2usage(-exitstatus => 0, -verbose => 99, sections => 'NAME|SYNOPSIS|DESCRIPTI
 # init logging
 Log::Log4perl->init( $logger_conf );
 my $logger = Log::Log4perl::get_logger('main');
+if ($verbose == 1)
+{
+  $logger->level($DEBUG);
+  Log::Log4perl->appender_thresholds_adjust(-1, ['Screen']);
+}
 
 my $config = YAML::Tiny->read($conf) ||
    $logger->logdie("Configuration file $conf is missing");
@@ -112,6 +120,7 @@ perl rssCollector.pl [-f <config-file>|--config-file=<config-file>] [<feed-file>
 
  Options:
    -f, --config-file    use specific config file
+   -v, --verbose        show more info about what happens
    -?, --help		shows this help
    --man		shows the full help
    feed-file		restrict the processing to a single feed by naming the file
@@ -142,7 +151,7 @@ The configuration is done in YAML syntax in a common fashion for all rss2nzb uti
 is the iterator for all the feeds to be processed by the rss2nzb utilities.
 
 =item nzb-path:
-is the directory where nzb files will be stored
+is the directory where nzb files will be stored (overridable at feed level)
 
 =item rss-path:
 is the directory where rss-feed files will be stored
@@ -150,7 +159,14 @@ is the directory where rss-feed files will be stored
 =item cache-path:
 is the directory where the nzb cache will be kept
 
-=item cookie-path: is the directory where the rss2nzb utilities will look for cookies
+=item cookie-path:
+is the directory where the rss2nzb utilities will look for cookies
+
+=item notify-method:
+the method notifications should be send with (rss|mail)
+
+=item notify-to:
+the destination notifications shall be written to. For 'rss' it is a rss file with path, for mail it is an address
 
 =back
 
@@ -193,6 +209,9 @@ Optional: an authentication string to be appended to URL when retrieving NZBs (s
 
 =item 'regexp:'
 Optional: it can be required to define a regexp to determine the URL of the link for download. In that case the regexp must contain a part between () to be used as match
+
+=item 'nzb-path:'
+Optional: path for saving NZBs. If defined at feed level this definition overrides the global nzb-path
 
 =back
 
