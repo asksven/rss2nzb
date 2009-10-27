@@ -27,8 +27,13 @@
 #			Added notification of whatever the process resulted in (rss and mail are supported)
 #			Added global error handling for showing stacktrace in case of unexpected errors
 #			Added -v|--verbose option to show debug messages
+# 2009-10-18	v0.5    Added error handling for call to XML::RSS->parse
+#			Added try-catch block for parsing to avoid die on XML error
 #
 # TODO
+#			Add -s(imulation) mode for the parser to show what it would do
+#			Externalize the notifier in a helper class
+#
 
 use XML::RSS;
 use LWP::Simple;
@@ -120,8 +125,15 @@ foreach my $feed (keys %feeds)
     $logger->warn("$sourceFile was not found in $sourceDir");
     next;
   }
-
-  $rss->parsefile($sourceDir . $sourceFile) ;
+  eval
+  {
+    $rss->parsefile($sourceDir . $sourceFile) ;
+  };
+  if ($@)
+  {
+    $logger->info("An error occured during parsing of '$sourceFile'. Error was '$@'");
+    next;
+  };
 
   # print the title and link of each RSS item
   foreach my $item (@{$rss->{'items'}})
@@ -326,7 +338,8 @@ sub notify
 # send collected notifications
 sub postProcess
 {
-  $logger->debug("Post-prcessing started");
+  $logger->debug("Post-processing started");
+
   my $method  = $config->[0]->{'notify-method'};
   my $address = $config->[0]->{'notify-to'};
 
@@ -423,6 +436,12 @@ Print a brief help message and exits.
 
 =item B<--man>
 Prints the manual page and exits.
+
+=item B<--config-file>
+Loads a given config-file instead of rss2nzb.conf
+
+=item B<--verbose>
+Prints debugging info
 
 =back
 
