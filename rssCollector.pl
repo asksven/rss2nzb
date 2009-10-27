@@ -16,6 +16,9 @@
 #			Added inline POC documentation
 #			Added command line parameters
 #			Added -v|--verbose option to show debug messages
+# 2009-10-18	v0.4	Added proper error handling for RSS retrieval
+# 2009-10-27	v0.5	Fix when LWP::Simple does not return correct data
+#			Error handling on HTTP errors fixed
 #
 # TODO
 
@@ -75,7 +78,7 @@ foreach my $key (keys %feeds)
 {
   if (($testFeed ne "") && ($feeds{$key}{'rss-file'} ne $testFeed))
   {
-    $logger->debug("Processing restricted to $testFeed, skipping $feeds{$key}{'rss-file'}");
+    $logger->debug("Collecting restricted to $testFeed, skipping $feeds{$key}{'rss-file'}");
     next;
    };
 
@@ -83,7 +86,7 @@ foreach my $key (keys %feeds)
   # date of file is 0 if file does not exist, else the date of last change
   my $fileDate = 0;
   my $now = time;
-  $logger->info("Processing " . $feeds{$key}{'rss-file'});
+  $logger->info("Checking " . $feeds{$key}{'rss-file'});
   $logger->debug("Checking last modification date of file " . $feeds{$key}{'rss-file'});
   if (( -e $targetDir . $feeds{$key}{'rss-file'} ))
   {
@@ -100,7 +103,11 @@ foreach my $key (keys %feeds)
   if ( ($fileAge) > $feeds{$key}{'poll'} )
   {
     $logger->info("Retrieving $key from ". $feeds{$key}{'url'});
-    LWP::Simple::getstore($feeds{$key}{'url'}, $targetDir . $feeds{$key}{'rss-file'});
+    my $response = LWP::Simple::getstore($feeds{$key}{'url'}, $targetDir . $feeds{$key}{'rss-file'});
+    if (!(LWP::Simple->is_success($response)))
+    {
+      $logger->error("The RSS feed '" . $feeds{$key}{'url'} . "' cound not be retrieved. Response was '$response'");
+    }
   }
   else
   {
