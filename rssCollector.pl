@@ -19,11 +19,13 @@
 # 2009-10-18	v0.4	Added proper error handling for RSS retrieval
 # 2009-10-27	v0.5	Fix when LWP::Simple does not return correct data
 #			Error handling on HTTP errors fixed
+# 2009-10-28	v0.5	Changes HTTP from LWP::Simple to HTTP::Request as User-Agent is sometimes required 
 #
 # TODO
 
 
-use LWP::Simple;
+use HTTP::Request;
+LWP::UserAgent;
 use YAML::Tiny;
 use Log::Log4perl qw(get_logger :levels);
 use Pod::Usage;
@@ -103,8 +105,9 @@ foreach my $key (keys %feeds)
   if ( ($fileAge) > $feeds{$key}{'poll'} )
   {
     $logger->info("Retrieving $key from ". $feeds{$key}{'url'});
-    my $response = LWP::Simple::getstore($feeds{$key}{'url'}, $targetDir . $feeds{$key}{'rss-file'});
-    if (!(LWP::Simple->is_success($response)))
+    my $response = getRSS($feeds{$key}{'url'}, $targetDir . $feeds{$key}{'rss-file'});
+    $logger->debug("The retrieval of the RSS feed returned the response $response");
+    if ((!(LWP::Simple->is_success($response))) && (LWP::Simple->is_error($response)))
     {
       $logger->error("The RSS feed '" . $feeds{$key}{'url'} . "' cound not be retrieved. Response was '$response'");
     }
@@ -112,6 +115,45 @@ foreach my $key (keys %feeds)
   else
   {
     $logger->debug("Skipping: $key, file is less than $feeds{$key}{'poll'} minutes old ($fileAge)");
+  }
+}
+
+# retrieve RSS
+sub getRSS
+{
+  my ($URI, $targetDir, $fileName) = @_;
+
+  $logger->info("Downloading from $URI to " . $targetDir . $fileName);
+
+  my $browser = LWP::UserAgent->new;
+
+  my $cookieFile = "";
+  my $cookieDir  = "";
+
+  if ($cookieFile ne "")
+  {
+    $browser->cookie_jar({ file => $cookieDir . $cookieFile });
+    $logger->debug("Getting $URI with cookie '" . $cookieDir . $cookieFile . "'");
+  }
+  else
+  {
+    $logger->debug("Getting $URI without cookie");
+  }
+  my $req= HTTP::Request->new('GET',$URI);
+
+  # set header as certain webservers were found to be picky and returning error 601
+  $req->header('Accept' => '*/*');
+  $req->header('User-Agent' => 'Mozilla/4.0 (compatible; MSIE 7.0b; Windows NT 6.0)');
+
+  my $response = $browser->request($req, $targetDir . $fileName);
+
+  if ($response->is_success)
+  {
+    $logger->debug("Downloaded: $response->decoded_content");
+  }
+  else
+  {
+    $logger->error("Error " . $response->status_line);
   }
 }
 
