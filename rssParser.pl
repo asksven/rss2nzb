@@ -30,6 +30,8 @@
 # 2009-10-18	v0.5    Added error handling for call to XML::RSS->parse
 #			Added try-catch block for parsing to avoid die on XML error
 #
+# 2010-08-22    v0.6    Added enclosure:url as an alternative for link to retrieve nzb's URL (for nzbindex.nl RSS) 			
+#
 # TODO
 #			Add -s(imulation) mode for the parser to show what it would do
 #			Externalize the notifier in a helper class
@@ -146,7 +148,7 @@ foreach my $feed (keys %feeds)
     $logger->debug("trying matches '" . $feeds{$feed}{'matches'} . "' on " . $item->{'title'});
     foreach my $filter (@filters)
     {
-      if ($item->{'title'} ~~ m/$filter/)
+      if ($item->{'title'} =~ m/$filter/)
       {
 	$logger->debug("match");
 	my @rejects	= split(/,/, $feeds{$feed}{'rejects'});
@@ -154,7 +156,7 @@ foreach my $feed (keys %feeds)
         $logger->debug("trying rejects expressions '" . $feeds{$feed}{'rejects'} . "' against " . $item->{'title'});
 	foreach my $reject (@rejects)
 	{
-	  if ( ($rejected == 0) && ($item->{'title'} ~~ m/$reject/))
+	  if ( ($rejected == 0) && ($item->{'title'} =~ m/$reject/))
 	  {
 	    $rejected = 1;
 	    $logger->debug("reject rule applies");
@@ -217,6 +219,10 @@ foreach my $feed (keys %feeds)
 	    {
 	      $value = $item->{'content'}->{'encoded'};
 	    }
+            elsif ($linkTag eq "enclosure:url")
+            {
+              $value = $item->{'enclosure'}->{'url'};
+            }
 	    else
 	    {
 	      $value = $item->{$linkTag};
@@ -225,7 +231,7 @@ foreach my $feed (keys %feeds)
 	    # extract nzb by regexp
 	    # e.g. for regexp for usenet revo: .*\<a href=\"(.*attachment.*)\"\>.* matches the URL
 	    my $regexp = $feeds{$feed}{'regexp'};
-	    $logger->debug("Trying to guess NZB URL with regexp '$regexp'");
+	    $logger->debug("Trying to guess NZB URL with regexp '$regexp' from value '$value'");
 
 	    if ($value =~ /$regexp/)
 	    {
