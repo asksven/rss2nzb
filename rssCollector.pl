@@ -20,12 +20,14 @@
 # 2009-10-27	v0.5	Fix when LWP::Simple does not return correct data
 #			Error handling on HTTP errors fixed
 # 2009-10-28	v0.5	Changes HTTP from LWP::Simple to HTTP::Request as User-Agent is sometimes required 
+# 2009-11-01	v0.6	Solved a few portability issues
 #
 # TODO
 
 
 use HTTP::Request;
-LWP::UserAgent;
+use LWP::UserAgent;
+use LWP::Simple;
 use YAML::Tiny;
 use Log::Log4perl qw(get_logger :levels);
 use Pod::Usage;
