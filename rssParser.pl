@@ -32,6 +32,12 @@
 #
 # 2010-08-22    v0.6    Added enclosure:url as an alternative for link to retrieve nzb's URL (for nzbindex.nl RSS) 			
 #
+# 2011-05-14    v0.7    Added handling of IMDB data
+#			imdb-match-genre, imdb-reject-genre, imdb-match-rating are supported
+#			imdb-match-genre = <comma-sep-string> (one of Action,Adventure,Animation,Biography,Comedy,Crime,Documentary,
+#			       Drama,Family,Fantasy,Film-Noir,Game-Show,History,Horror,Music,Musical,Mystery,News,Reality-TV,Romance,Sci-Fi,Sport,Talk-Show,Thriller,War,Western)
+# 			imdb-reject-genre = see imdb-macth_genre
+# 			imdb-match-rating = <number>
 # TODO
 #			Add -s(imulation) mode for the parser to show what it would do
 #			Externalize the notifier in a helper class
@@ -144,6 +150,37 @@ foreach my $feed (keys %feeds)
     my $nzbPath = $targetDir;
     $nzbPath = ($feeds{$feed}{'nzb-path'} . "/") unless ($feeds{$feed}{'nzb-path'} eq "");
 
+    # shall imdb be fetched?
+    my $useIMDB = 0;
+    $useIMDB = ($feeds{$feed}{'use-imdb'}) unless ($feeds{$feed}{'use-imdb'} eq "");
+    my %imdbData = ();
+     
+    if ($useIMDB)
+    {
+      my $descr = $item->{'description'};
+      
+      #imdb is like <a href="http://www.imdb.com/title/tt1464540/">1464540</a>
+      $descr =~ /<a href="http:\/\/www\.imdb\.com\/title\/tt\d*\/">(.*?)<\/a>/s ;
+      my $imdbID = $1;
+ 
+      my $request = "http://www.imdbapi.com/?t=tt" . $imdbID;
+      my $response = getHttp($request);
+      $logger->debug("IMDB query for $imdbID returned $response");
+
+      # clean up response
+      $response =~ s/{//g;
+      $response =~ s/}//g;
+      my @pairs = split(/","/, $response);
+      %imdbData = ();
+      foreach my $pair (@pairs)
+      {
+        $pair =~ s/"//g;
+        my ($key, $value) = split(/:/, $pair);
+        $imdbData{$key} = $value;
+#        $logger->debug("IMDB: $key = $value");
+      }
+    }
+
     my @filters = split(/,/, $feeds{$feed}{'matches'});
     $logger->debug("trying matches '" . $feeds{$feed}{'matches'} . "' on " . $item->{'title'});
     foreach my $filter (@filters)
@@ -165,93 +202,177 @@ foreach my $feed (keys %feeds)
 	if ($rejected == 0)
 	{
 	  $logger->debug("Match found: $item->{'title'}");
-	  # default link tag is "link" but it can be overridden by setting feed property 'link-tag' in case the rss does not point to NZBs
-	  my $linkTag	= $feeds{$feed}{'link-tag'};
-	  $linkTag 	= "link"	unless ($linkTag ne "");
-	  my $auth	= $feeds{$feed}{'auth'};
-	  $auth		= ('&' . $auth) unless ($auth eq "");
 
-	  # default action is 'getnzb' but it can be overridden by setting feed property 'action' to 'dump' or 'guessnzb' 
-	  my $linkAction 	= $feeds{$feed}{'action'};
-	  $linkAction 	= "getnzb" 	unless ($linkAction ne "");
-
-	  # default behaviour is not to use cookies but it can be overridden by setting feed property 'use-cookie' to a LWP cookie file 
-	  my $cookieFile 	= $feeds{$feed}{'use-cookie'};
-
-	  $logger->debug("Going to retrieve tag: '$linkTag' with action '$linkAction'");
-	  #
-	  # go for normal action: download the link as nzb
-	  #
-	  if ($linkAction eq "getnzb")
-	  {
-	    getNzb($item->{'title'}, $item->{$linkTag} . $auth, "", $nzbPath);
-	  }
-	  #
-	  # alternative action 'dump' is for debugging purpose
-	  #
-	  elsif ($linkAction eq "dump")
-	  {
-	    my $value 	= "";
-	    my $link 	= "";
-	    
-	    # content encoded is a special case as 'content' is a hashmap
-	    if ($linkTag eq "content:encoded")
-	    {
-	      $value = $item->{'content'}->{'encoded'};
-	    }
-	    else
-	    {
-	      $value = $item->{$linkTag};
-	    }
-
-	    $logger->debug("DUMP:::" . $value . ":::");	    
-	  }
-	  #
-	  # method to extract nzb URL from a field using regex from feed attribue 'regexp'
-	  #
-	  elsif ($linkAction eq "guessnzb")
-	  {
-	    my $value 	= "";
-	    my $link 	= "";
-	    
-	    # content encoded is a special case as 'content' is a hashmap
-	    if ($linkTag eq "content:encoded")
-	    {
-	      $value = $item->{'content'}->{'encoded'};
-	    }
-            elsif ($linkTag eq "enclosure:url")
+          # handle IMDB filters
+          # todo: imdb-match-year = <number> (YYYY)
+          # todo: imdb-match-rated = <1-char> (R|?)
+          # imdb-match-genre = <comma-sep-string> (one of Action,Adventure,Animation,Biography,Comedy,Crime,Documentary,
+	  #       Drama,Family,Fantasy,Film-Noir,Game-Show,History,Horror,Music,Musical,Mystery,News,Reality-TV,Romance,Sci-Fi,Sport,Talk-Show,Thriller,War,Western)
+          # imdb-reject-genre = see imdb-macth_genre
+          # todo: imdb-match-director = <string>
+          # todo: imdb-match-actors = <comma-sep-string
+          # imdb-match-rating = <number>
+          # todo: imdb-match-votes = <number>
+          my $passIMDB = 1; 
+          
+          if ($useIMDB)
+          {
+            if ( ($feeds{$feed}{'imdb-match-genre'} ne "") || ($feeds{$feed}{'imdb-reject-genre'} ne "") || ($feeds{$feed}{'imdb-match-rating'} ne ""))
             {
-              $value = $item->{'enclosure'}->{'url'};
-            }
-	    else
-	    {
-	      $value = $item->{$linkTag};
-	    }
-	    
-	    # extract nzb by regexp
-	    # e.g. for regexp for usenet revo: .*\<a href=\"(.*attachment.*)\"\>.* matches the URL
-	    my $regexp = $feeds{$feed}{'regexp'};
-	    $logger->debug("Trying to guess NZB URL with regexp '$regexp' from value '$value'");
+              # check match on genre if defined
+              if ($feeds{$feed}{'imdb-match-genre'} ne "")
+              {
+                my $imdbMatchGenre = lc $feeds{$feed}{'imdb-match-genre'};
+                my @filters = split(/,/, $imdbMatchGenre);
+                $passIMDB = 0; 
+                my $imdbGenre = lc $imdbData{'Genre'};
+                $logger->debug("trying to match genre expressions '" . $imdbMatchGenre . "' against '" . $imdbGenre . "'");
+                foreach my $filter (@filters)
+                {
+                  if ($passIMDB == 0)
+                  {
+                    if ( $imdbGenre =~ m/$filter/ )
+                    { 
+                      $passIMDB = 1;
+                      $logger->debug("Match on IMDB genre found: $filter matches $imdbGenre");
+                    }
+                    else
+                    { 
+                      $logger->debug("Match on IMDB genre failed: $filter does not match $imdbGenre");
+                    }
+                  }
+                }
+              }
+              # check reject on genre if defined
+              if (($passIMDB == 1) && ($feeds{$feed}{'imdb-reject-genre'} ne ""))
+              {
+                my $imdbMatchGenre = lc $feeds{$feed}{'imdb-reject-genre'};
+                my @filters = split(/,/, $imdbMatchGenre);
+                my $imdbGenre = lc $imdbData{'Genre'};
+                $logger->debug("trying to match genre expressions '" . $imdbMatchGenre . "' against '" . $imdbGenre . "'");
+                foreach my $filter (@filters)
+                {
+                  if ($passIMDB == 1)
+                  {
+                    if ( $imdbGenre =~ m/$filter/ )
+                    {
+                      $passIMDB = 0;
+                      $logger->debug("Reject on IMDB genre found: $filter matches $imdbGenre : rejected");
+                    }
+                  }
+                }
+              }
 
-	    if ($value =~ /$regexp/)
+              # test match on rating if defined and prev test has not failed
+              if ( ($passIMDB == 1) && ($feeds{$feed}{'imdb-match-rating'} ne "") )
+              {
+                my $imdbMinRating = $feeds{$feed}{'imdb-match-rating'};
+
+                $logger->debug("trying to match rating threshold '" . $imdbMinRating . "' against " . $imdbData{'Rating'});
+
+                $passIMDB = 0;
+                if ( $imdbData{'Rating'} >= $imdbMinRating )
+                {
+                  $passIMDB = 1;
+                  $logger->debug("Match on IMDB rating found: $imdbData{'Rating'} >= $imdbMinRating");
+                }
+                else
+                {
+                  $logger->debug("Match on IMDB rating failed: $imdbData{'Rating'} is not >= $imdbMinRating");
+                }
+              }
+            }
+          }
+          if ( $passIMDB )
+          {
+	    # default link tag is "link" but it can be overridden by setting feed property 'link-tag' in case the rss does not point to NZBs
+	    my $linkTag	= $feeds{$feed}{'link-tag'};
+	    $linkTag 	= "link"	unless ($linkTag ne "");
+	    my $auth	= $feeds{$feed}{'auth'};
+	    $auth		= ('&' . $auth) unless ($auth eq "");
+
+	    # default action is 'getnzb' but it can be overridden by setting feed property 'action' to 'dump' or 'guessnzb' 
+	    my $linkAction 	= $feeds{$feed}{'action'};
+	    $linkAction 	= "getnzb" 	unless ($linkAction ne "");
+
+	    # default behaviour is not to use cookies but it can be overridden by setting feed property 'use-cookie' to a LWP cookie file 
+	    my $cookieFile 	= $feeds{$feed}{'use-cookie'};
+
+	    $logger->debug("Going to retrieve tag: '$linkTag' with action '$linkAction'");
+	    #
+	    # go for normal action: download the link as nzb
+	    #
+	    if ($linkAction eq "getnzb")
 	    {
-	      $logger->debug("Matched link $1");
-	      $link = $1;
-	      # normalize encoded parts
-	      $link =~ s/&amp;/&/g;
+	      getNzb($item->{'title'}, $item->{$linkTag} . $auth, "", $nzbPath);
+	    }
+	    #
+	    # alternative action 'dump' is for debugging purpose
+	    #
+	    elsif ($linkAction eq "dump")
+	    {
+	      my $value 	= "";
+	      my $link 	= "";
+	    
+    	      # content encoded is a special case as 'content' is a hashmap
+	      if ($linkTag eq "content:encoded")
+	      {
+	        $value = $item->{'content'}->{'encoded'};
+	      }
+	      else
+	      {
+	        $value = $item->{$linkTag};
+	      }
+
+	      $logger->debug("DUMP:::" . $value . ":::");	    
+	    }
+	    #
+	    # method to extract nzb URL from a field using regex from feed attribue 'regexp'
+	    #
+	    elsif ($linkAction eq "guessnzb")
+	    {
+	      my $value 	= "";
+	      my $link 	= "";
+	    
+	      # content encoded is a special case as 'content' is a hashmap
+	      if ($linkTag eq "content:encoded")
+	      {
+	        $value = $item->{'content'}->{'encoded'};
+	      }
+              elsif ($linkTag eq "enclosure:url")
+              {
+                $value = $item->{'enclosure'}->{'url'};
+              }
+	      else
+	      {
+	        $value = $item->{$linkTag};
+	      }
+	    
+	      # extract nzb by regexp
+	      # e.g. for regexp for usenet revo: .*\<a href=\"(.*attachment.*)\"\>.* matches the URL
+	      my $regexp = $feeds{$feed}{'regexp'};
+	      $logger->debug("Trying to guess NZB URL with regexp '$regexp' from value '$value'");
+
+	      if ($value =~ /$regexp/)
+	      {
+	        $logger->debug("Matched link $1");
+	        $link = $1;
+	        # normalize encoded parts
+	        $link =~ s/&amp;/&/g;
+	      }
+	      else
+	      {
+	        $logger->debug("No match found");
+	      }
+	    
+	      # if a link was found assume it's an NZB and download it
+	      getNzb($item->{'title'}, $link . $auth, $cookieFile, $nzbPath);
 	    }
 	    else
 	    {
-	      $logger->debug("No match found");
+	      $logger->error("Undefined action '$linkAction' for feed $feed. No action taken");
 	    }
-	    
-	    # if a link was found assume it's an NZB and download it
-	    getNzb($item->{'title'}, $link . $auth, $cookieFile, $nzbPath);
-	  }
-	  else
-	  {
-	    $logger->error("Undefined action '$linkAction' for feed $feed. No action taken");
-	  }
+          }
 	}
       }
     }
@@ -317,6 +438,30 @@ sub getNzb
   else
   {
     $logger->debug("Skipping: file $fileName already exists");
+  }
+}
+
+# retrieve HTTP response
+sub getHttp
+{
+  my ($URI) = @_;
+
+  $logger->info("Downloading from $URI");
+
+  my $browser = LWP::UserAgent->new;
+
+
+  my $response = $browser->get($URI);
+
+  if ($response->is_success)
+  {
+    $logger->debug("Downloaded: $response->decoded_content");
+    return $response->decoded_content;
+  }
+  else
+  {
+    $logger->error("Error " . $response->status_line);
+    return "";
   }
 }
 
